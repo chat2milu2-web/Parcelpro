@@ -1,0 +1,6 @@
+{
+  "name": "Parcel Entry Pro",
+  "description": "Office parcel data entry, barcode scanning, and Excel export application",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

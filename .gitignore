@@ -1,0 +1,35 @@
+*.iml
+.gradle
+.kotlin
+/local.properties
+local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+build/
+**/build/
+/captures
+.externalNativeBuild
+.cxx
+.build-outputs/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Keystores & Signing credentials
+*.jks
+*.keystore
+debug.keystore
+debug.keystore.base64
+keystore.properties
+
+# Android binaries
+*.apk
+*.aab

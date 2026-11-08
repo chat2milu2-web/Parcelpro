@@ -1,0 +1,156 @@
+name: Build Signed Release APK & Publish GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, Verify & Release Signed APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Ensure Gradle Wrapper is Executable
+        run: chmod +x ./gradlew
+
+      - name: Decode Release Keystore from Secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error::Missing GitHub Secret: KEYSTORE_BASE64"
+            exit 1
+          fi
+          TARGET_PATH="${KEYSTORE_PATH:-my-upload-key.jks}"
+          mkdir -p "$(dirname "$TARGET_PATH")"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$TARGET_PATH"
+          chmod 600 "$TARGET_PATH"
+          if [ ! -s "$TARGET_PATH" ]; then
+            echo "::error::Decoded keystore file is empty or invalid"
+            exit 1
+          fi
+          echo "RESOLVED_KEYSTORE_PATH=$(realpath "$TARGET_PATH")" >> "$GITHUB_ENV"
+
+      - name: Build Signed Release APK
+        env:
+          KEYSTORE_PATH: ${{ env.RESOLVED_KEYSTORE_PATH }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${STORE_PASSWORD:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+            echo "::error::Missing STORE_PASSWORD or KEY_PASSWORD GitHub Secret"
+            exit 1
+          fi
+          ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Verify Signed APK, Package ID & Generate Release Metadata
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # 1. Confirm Release APK exists
+          APK_SOURCE=$(find app/build/outputs/apk/release -maxdepth 2 -name "*-release.apk" | head -n 1)
+          if [ -z "$APK_SOURCE" ] || [ ! -f "$APK_SOURCE" ]; then
+            echo "::error::Signed Release APK was not found in app/build/outputs/apk/release/ (Ensure signing credentials are valid and APK is not unsigned)"
+            ls -la app/build/outputs/apk/release/ || true
+            exit 1
+          fi
+
+          mkdir -p release-assets
+          RELEASE_APK="release-assets/Parcel-Pro-release.apk"
+          cp "$APK_SOURCE" "$RELEASE_APK"
+
+          # 2. Locate Android Build Tools (apksigner & aapt2)
+          BUILD_TOOLS_DIR=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          AAPT2="$BUILD_TOOLS_DIR/aapt2"
+
+          # 3. Verify cryptographic APK signature
+          echo "Verifying APK cryptographic signature..."
+          "$APKSIGNER" verify --verbose "$RELEASE_APK"
+
+          # 4. Extract & Verify Package ID, versionCode, and versionName directly from the compiled APK & Gradle configuration
+          BADGING=$("$AAPT2" dump badging "$RELEASE_APK")
+          PKG_NAME=$(echo "$BADGING" | sed -n "s/.*package: name='\([^']*\)'.*/\1/p" | head -n 1)
+          VERSION_CODE=$(echo "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" | head -n 1)
+          VERSION_NAME=$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n 1)
+
+          GRADLE_APP_ID=$(sed -n 's/.*applicationId\s*=\s*"\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          GRADLE_VERSION_CODE=$(sed -n 's/.*versionCode\s*=\s*\([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n 1)
+          GRADLE_VERSION_NAME=$(sed -n 's/.*versionName\s*=\s*"\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+
+          if [ "$PKG_NAME" != "com.aistudio.parcelentrypro.xzqk" ] || [ "$GRADLE_APP_ID" != "com.aistudio.parcelentrypro.xzqk" ]; then
+            echo "::error::Package ID mismatch! Expected 'com.aistudio.parcelentrypro.xzqk', got APK='$PKG_NAME', Gradle='$GRADLE_APP_ID'"
+            exit 1
+          fi
+
+          if [ "$VERSION_CODE" != "$GRADLE_VERSION_CODE" ] || [ "$VERSION_NAME" != "$GRADLE_VERSION_NAME" ]; then
+            echo "::error::Version mismatch between APK ($VERSION_CODE / $VERSION_NAME) and app/build.gradle.kts ($GRADLE_VERSION_CODE / $GRADLE_VERSION_NAME)"
+            exit 1
+          fi
+
+          echo "Verified Package ID: $PKG_NAME (versionCode=$VERSION_CODE, versionName=$VERSION_NAME)"
+
+          # 5. Calculate SHA-256 Checksum & Generate SHA256SUMS.txt
+           (cd release-assets && sha256sum Parcel-Pro-release.apk > SHA256SUMS.txt)
+          APK_SHA256=$(awk '{print $1}' release-assets/SHA256SUMS.txt)
+
+          # 6. Dynamically Generate update.json
+          APK_DOWNLOAD_URL="https://github.com/${REPO_NAME}/releases/download/${TAG_NAME}/Parcel-Pro-release.apk"
+          RELEASE_NOTES_URL="https://github.com/${REPO_NAME}/releases/tag/${TAG_NAME}"
+
+          python3 -c '
+          import json, sys
+          data = {
+              "versionCode": int(sys.argv[1]),
+              "versionName": sys.argv[2],
+              "packageName": sys.argv[3],
+              "apkDownloadUrl": sys.argv[4],
+              "sha256Checksum": sys.argv[5],
+              "releaseNotesUrl": sys.argv[6]
+          }
+          with open("release-assets/update.json", "w", encoding="utf-8") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          ' "$GRADLE_VERSION_CODE" "$GRADLE_VERSION_NAME" "$GRADLE_APP_ID" "$APK_DOWNLOAD_URL" "$APK_SHA256" "$RELEASE_NOTES_URL"
+
+          echo "Generated update.json and SHA256SUMS.txt successfully."
+
+      - name: Securely Delete Temporary Keystore Files
+        if: always()
+        env:
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+        run: |
+          rm -f "${RESOLVED_KEYSTORE_PATH:-}"
+          rm -f "${KEYSTORE_PATH:-my-upload-key.jks}"
+          rm -f my-upload-key.jks
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Parcel Pro ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release-assets/Parcel-Pro-release.apk
+            release-assets/update.json
+            release-assets/SHA256SUMS.txt

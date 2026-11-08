@@ -6,13 +6,100 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.models.ExcelColumnConfig
 import com.example.data.models.ExcelTemplateConfig
 import com.example.data.preferences.AppPreferencesRepository
+import com.example.util.AppUpdateManager
+import com.example.util.AppUpdateUiState
+import com.example.util.UpdateMetadata
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
     private val prefsRepository = AppPreferencesRepository(application)
+
+    private val _updateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
+    val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
+
+    val installedVersionName: String = AppUpdateManager.installedVersionName
+    val installedVersionCode: Int = AppUpdateManager.installedVersionCode
+
+    fun checkForUpdates() {
+        val currentState = _updateState.value
+        if (currentState is AppUpdateUiState.Checking ||
+            currentState is AppUpdateUiState.Downloading ||
+            currentState is AppUpdateUiState.Verifying
+        ) {
+            return
+        }
+
+        viewModelScope.launch {
+            _updateState.value = AppUpdateUiState.Checking
+            val result = AppUpdateManager.fetchLatestUpdateMetadata()
+            result.fold(
+                onSuccess = { metadata ->
+                    if (metadata.versionCode > installedVersionCode) {
+                        _updateState.value = AppUpdateUiState.UpdateAvailable(metadata)
+                    } else {
+                        _updateState.value = AppUpdateUiState.UpToDate(
+                            currentVersionName = installedVersionName,
+                            currentVersionCode = installedVersionCode
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _updateState.value = AppUpdateUiState.Error(
+                        message = error.localizedMessage ?: "Unable to check for updates. Please verify your internet connection."
+                    )
+                }
+            )
+        }
+    }
+
+    fun startUpdateDownload(metadata: UpdateMetadata) {
+        val currentState = _updateState.value
+        if (currentState is AppUpdateUiState.Downloading || currentState is AppUpdateUiState.Verifying) {
+            return
+        }
+
+        viewModelScope.launch {
+            _updateState.value = AppUpdateUiState.Downloading(metadata, 0)
+            val appContext = getApplication<Application>().applicationContext
+            val downloadResult = AppUpdateManager.downloadAndVerifyApk(
+                context = appContext,
+                metadata = metadata,
+                onProgress = { progress ->
+                    _updateState.value = AppUpdateUiState.Downloading(metadata, progress)
+                },
+                onVerifying = {
+                    _updateState.value = AppUpdateUiState.Verifying(metadata)
+                }
+            )
+
+            downloadResult.fold(
+                onSuccess = { apkFile ->
+                    _updateState.value = AppUpdateUiState.ReadyToInstall(metadata, apkFile)
+                    AppUpdateManager.launchApkInstaller(appContext, apkFile)
+                },
+                onFailure = { error ->
+                    _updateState.value = AppUpdateUiState.Error(
+                        message = error.localizedMessage ?: "Download or verification failed.",
+                        metadata = metadata
+                    )
+                }
+            )
+        }
+    }
+
+    fun installDownloadedUpdate(apkFile: java.io.File) {
+        val appContext = getApplication<Application>().applicationContext
+        AppUpdateManager.launchApkInstaller(appContext, apkFile).onFailure { error ->
+            _updateState.value = AppUpdateUiState.Error(
+                message = error.localizedMessage ?: "Could not open package installer."
+            )
+        }
+    }
 
     val themeMode: StateFlow<String> = prefsRepository.themeMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "SYSTEM")

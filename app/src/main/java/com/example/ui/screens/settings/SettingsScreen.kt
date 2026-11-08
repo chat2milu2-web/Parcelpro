@@ -57,14 +57,21 @@ import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.graphics.Color
 import com.example.data.models.ExcelColumnConfig
 import com.example.data.models.DimensionPreset
+import com.example.util.AppUpdateUiState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,6 +89,7 @@ fun SettingsScreen(
     val hapticFeedback by viewModel.hapticFeedback.collectAsStateWithLifecycle()
     val autoOpenCamera by viewModel.autoOpenCamera.collectAsStateWithLifecycle()
     val excelConfig by viewModel.excelConfig.collectAsStateWithLifecycle()
+    val updateState by viewModel.updateState.collectAsStateWithLifecycle()
 
     var selectedTabIndex by remember { mutableStateOf(0) }
 
@@ -307,6 +315,367 @@ fun SettingsScreen(
                                     onCheckedChange = { viewModel.updateAutoOpenCamera(it) },
                                     modifier = Modifier.testTag("auto_camera_switch")
                                 )
+                            }
+                        }
+                    }
+
+                    // App Updates Card (General Tab Only)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("settings_app_updates_card"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.5.dp, Color(0xFF0EA5E9)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0EA5E9),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "App Updates",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0EA5E9)
+                                    )
+                                    Text(
+                                        text = "Installed Version: v${viewModel.installedVersionName} (Build ${viewModel.installedVersionCode})",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.testTag("installed_version_text")
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                    Text(
+                                        text = "Check for Updates",
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "Verify if a newer signed version is available on GitHub",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                val isBusy = updateState is AppUpdateUiState.Checking ||
+                                    updateState is AppUpdateUiState.Downloading ||
+                                    updateState is AppUpdateUiState.Verifying
+
+                                OutlinedButton(
+                                    onClick = { viewModel.checkForUpdates() },
+                                    enabled = !isBusy,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.testTag("check_for_updates_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Check for Updates",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Check for Updates", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+
+                            when (val state = updateState) {
+                                is AppUpdateUiState.Idle -> {
+                                    // Clean default state
+                                }
+
+                                is AppUpdateUiState.Checking -> {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(12.dp)
+                                            .testTag("update_checking_state"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.5.dp,
+                                            color = Color(0xFF0EA5E9)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = "Checking GitHub Releases for updates...",
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+
+                                is AppUpdateUiState.UpToDate -> {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                Color(0xFF10B981).copy(alpha = 0.12f),
+                                                RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(12.dp)
+                                            .testTag("update_up_to_date_state"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF10B981),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Parcel Pro is up to date",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = Color(0xFF10B981)
+                                            )
+                                            Text(
+                                                text = "You have the latest version (v${state.currentVersionName}).",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+
+                                is AppUpdateUiState.UpdateAvailable -> {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("update_available_state"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = Color(0xFF0EA5E9).copy(alpha = 0.1f)
+                                        ),
+                                        border = BorderStroke(1.dp, Color(0xFF0EA5E9))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Column(modifier = Modifier.fillMaxWidth()) {
+                                                Text(
+                                                    text = "New Update Available: v${state.metadata.versionName} (Build ${state.metadata.versionCode})",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp,
+                                                    color = Color(0xFF0EA5E9)
+                                                )
+                                                Text(
+                                                    text = "Your parcels, batches, and settings will be preserved during the update.",
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+
+                                            Button(
+                                                onClick = { viewModel.startUpdateDownload(state.metadata) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0EA5E9)),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .testTag("update_now_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.SystemUpdate,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("Update Now", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                is AppUpdateUiState.Downloading -> {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(12.dp)
+                                            .testTag("update_downloading_state"),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Downloading v${state.metadata.versionName}...",
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = "${state.progressPercent}%",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = Color(0xFF0EA5E9)
+                                            )
+                                        }
+                                        LinearProgressIndicator(
+                                            progress = { state.progressPercent / 100f },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(6.dp),
+                                            color = Color(0xFF0EA5E9)
+                                        )
+                                    }
+                                }
+
+                                is AppUpdateUiState.Verifying -> {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                                RoundedCornerShape(10.dp)
+                                            )
+                                            .padding(12.dp)
+                                            .testTag("update_verifying_state"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.5.dp,
+                                            color = Color(0xFF0EA5E9)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = "Verifying SHA-256 checksum & package integrity...",
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+
+                                is AppUpdateUiState.ReadyToInstall -> {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("update_success_state"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = Color(0xFF10B981).copy(alpha = 0.12f)
+                                        ),
+                                        border = BorderStroke(1.dp, Color(0xFF10B981))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF10B981),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "Update Verified & Ready (v${state.metadata.versionName})",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 13.sp,
+                                                        color = Color(0xFF10B981)
+                                                    )
+                                                    Text(
+                                                        text = "SHA-256 checksum verified. Tap below if the installer did not open automatically.",
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+
+                                            Button(
+                                                onClick = { viewModel.installDownloadedUpdate(state.apkFile) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .testTag("install_update_button")
+                                            ) {
+                                                Text("Install Update Now", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                is AppUpdateUiState.Error -> {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("update_error_state"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                                        ),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ErrorOutline,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = state.message,
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+
+                                            if (state.metadata != null) {
+                                                OutlinedButton(
+                                                    onClick = { viewModel.startUpdateDownload(state.metadata) },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text("Retry Update Download", fontSize = 12.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

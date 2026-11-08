@@ -68,7 +68,12 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.models.ExcelColumnConfig
 import com.example.data.models.DimensionPreset
 import com.example.util.AppUpdateUiState
@@ -90,6 +95,19 @@ fun SettingsScreen(
     val autoOpenCamera by viewModel.autoOpenCamera.collectAsStateWithLifecycle()
     val excelConfig by viewModel.excelConfig.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.onResumeCheckInstallPermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     var selectedTabIndex by remember { mutableStateOf(0) }
 
@@ -548,6 +566,21 @@ fun SettingsScreen(
                                                 .height(6.dp),
                                             color = Color(0xFF0EA5E9)
                                         )
+                                        OutlinedButton(
+                                            onClick = { viewModel.cancelUpdateDownload() },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("cancel_update_download_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Clear,
+                                                contentDescription = "Cancel Download",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Cancel Download", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        }
                                     }
                                 }
 
@@ -574,6 +607,60 @@ fun SettingsScreen(
                                             fontSize = 13.sp,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
+                                    }
+                                }
+
+                                is AppUpdateUiState.PermissionRequired -> {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("update_permission_required_state"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = Color(0xFFF59E0B).copy(alpha = 0.12f)
+                                        ),
+                                        border = BorderStroke(1.dp, Color(0xFFF59E0B))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Security,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFF59E0B),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "Allow App Installation Permission",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 13.sp,
+                                                        color = Color(0xFFF59E0B)
+                                                    )
+                                                    Text(
+                                                        text = "Update v${state.metadata.versionName} is downloaded and SHA-256 verified. To install updates from GitHub, please enable 'Allow from this source' in Android Settings.",
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+
+                                            Button(
+                                                onClick = { viewModel.openInstallPermissionSettings() },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .testTag("open_install_permission_settings_button")
+                                            ) {
+                                                Text("Open Android Settings", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            }
+                                        }
                                     }
                                 }
 
@@ -618,7 +705,7 @@ fun SettingsScreen(
                                             }
 
                                             Button(
-                                                onClick = { viewModel.installDownloadedUpdate(state.apkFile) },
+                                                onClick = { viewModel.installDownloadedUpdate(state.metadata, state.apkFile) },
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                                                 shape = RoundedCornerShape(10.dp),
                                                 modifier = Modifier

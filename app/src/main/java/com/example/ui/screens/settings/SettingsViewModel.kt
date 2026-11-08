@@ -9,6 +9,8 @@ import com.example.data.preferences.AppPreferencesRepository
 import com.example.util.AppUpdateManager
 import com.example.util.AppUpdateUiState
 import com.example.util.UpdateMetadata
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +24,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val _updateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
     val updateState: StateFlow<AppUpdateUiState> = _updateState.asStateFlow()
 
+    private var activeDownloadJob: Job? = null
+
     val installedVersionName: String = AppUpdateManager.installedVersionName
     val installedVersionCode: Int = AppUpdateManager.installedVersionCode
 
@@ -29,7 +33,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val currentState = _updateState.value
         if (currentState is AppUpdateUiState.Checking ||
             currentState is AppUpdateUiState.Downloading ||
-            currentState is AppUpdateUiState.Verifying
+            currentState is AppUpdateUiState.Verifying ||
+            activeDownloadJob?.isActive == true
         ) {
             return
         }
@@ -39,7 +44,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val result = AppUpdateManager.fetchLatestUpdateMetadata()
             result.fold(
                 onSuccess = { metadata ->
-                    if (metadata.versionCode > installedVersionCode) {
+                    if (AppUpdateManager.isUpdateAvailable(metadata.versionCode, installedVersionCode)) {
                         _updateState.value = AppUpdateUiState.UpdateAvailable(metadata)
                     } else {
                         _updateState.value = AppUpdateUiState.UpToDate(
@@ -59,46 +64,103 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun startUpdateDownload(metadata: UpdateMetadata) {
         val currentState = _updateState.value
-        if (currentState is AppUpdateUiState.Downloading || currentState is AppUpdateUiState.Verifying) {
+        if (currentState is AppUpdateUiState.Downloading ||
+            currentState is AppUpdateUiState.Verifying ||
+            activeDownloadJob?.isActive == true
+        ) {
             return
         }
 
-        viewModelScope.launch {
-            _updateState.value = AppUpdateUiState.Downloading(metadata, 0)
-            val appContext = getApplication<Application>().applicationContext
-            val downloadResult = AppUpdateManager.downloadAndVerifyApk(
-                context = appContext,
-                metadata = metadata,
-                onProgress = { progress ->
-                    _updateState.value = AppUpdateUiState.Downloading(metadata, progress)
-                },
-                onVerifying = {
-                    _updateState.value = AppUpdateUiState.Verifying(metadata)
-                }
-            )
+        activeDownloadJob = viewModelScope.launch {
+            try {
+                _updateState.value = AppUpdateUiState.Downloading(metadata, 0)
+                val appContext = getApplication<Application>().applicationContext
+                val downloadResult = AppUpdateManager.downloadAndVerifyApk(
+                    context = appContext,
+                    metadata = metadata,
+                    onProgress = { progress ->
+                        _updateState.value = AppUpdateUiState.Downloading(metadata, progress)
+                    },
+                    onVerifying = {
+                        _updateState.value = AppUpdateUiState.Verifying(metadata)
+                    }
+                )
 
-            downloadResult.fold(
-                onSuccess = { apkFile ->
-                    _updateState.value = AppUpdateUiState.ReadyToInstall(metadata, apkFile)
-                    AppUpdateManager.launchApkInstaller(appContext, apkFile)
-                },
-                onFailure = { error ->
-                    _updateState.value = AppUpdateUiState.Error(
-                        message = error.localizedMessage ?: "Download or verification failed.",
-                        metadata = metadata
-                    )
-                }
+                downloadResult.fold(
+                    onSuccess = { apkFile ->
+                        proceedWithVerifiedApk(metadata, apkFile)
+                    },
+                    onFailure = { error ->
+                        _updateState.value = AppUpdateUiState.Error(
+                            message = error.localizedMessage ?: "Download or SHA-256 verification failed.",
+                            metadata = metadata
+                        )
+                    }
+                )
+            } catch (e: CancellationException) {
+                _updateState.value = AppUpdateUiState.UpdateAvailable(metadata)
+                throw e
+            } finally {
+                activeDownloadJob = null
+            }
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        val currentState = _updateState.value
+        val metadata = when (currentState) {
+            is AppUpdateUiState.Downloading -> currentState.metadata
+            is AppUpdateUiState.Verifying -> currentState.metadata
+            else -> null
+        }
+        activeDownloadJob?.cancel()
+        activeDownloadJob = null
+        if (metadata != null) {
+            _updateState.value = AppUpdateUiState.UpdateAvailable(metadata)
+        } else {
+            _updateState.value = AppUpdateUiState.Idle
+        }
+    }
+
+    private fun proceedWithVerifiedApk(metadata: UpdateMetadata, apkFile: java.io.File) {
+        val appContext = getApplication<Application>().applicationContext
+        if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
+            _updateState.value = AppUpdateUiState.ReadyToInstall(metadata, apkFile)
+            AppUpdateManager.launchApkInstaller(appContext, apkFile).onFailure { error ->
+                _updateState.value = AppUpdateUiState.Error(
+                    message = error.localizedMessage ?: "Could not open package installer.",
+                    metadata = metadata
+                )
+            }
+        } else {
+            _updateState.value = AppUpdateUiState.PermissionRequired(metadata, apkFile)
+        }
+    }
+
+    fun openInstallPermissionSettings() {
+        val appContext = getApplication<Application>().applicationContext
+        AppUpdateManager.openManageUnknownAppSourcesSettings(appContext).onFailure { error ->
+            val currentState = _updateState.value
+            val metadata = (currentState as? AppUpdateUiState.PermissionRequired)?.metadata
+            _updateState.value = AppUpdateUiState.Error(
+                message = error.localizedMessage ?: "Unable to open Android Unknown App Sources settings.",
+                metadata = metadata
             )
         }
     }
 
-    fun installDownloadedUpdate(apkFile: java.io.File) {
-        val appContext = getApplication<Application>().applicationContext
-        AppUpdateManager.launchApkInstaller(appContext, apkFile).onFailure { error ->
-            _updateState.value = AppUpdateUiState.Error(
-                message = error.localizedMessage ?: "Could not open package installer."
-            )
+    fun onResumeCheckInstallPermission() {
+        val currentState = _updateState.value
+        if (currentState is AppUpdateUiState.PermissionRequired) {
+            val appContext = getApplication<Application>().applicationContext
+            if (AppUpdateManager.canRequestPackageInstalls(appContext)) {
+                proceedWithVerifiedApk(currentState.metadata, currentState.apkFile)
+            }
         }
+    }
+
+    fun installDownloadedUpdate(metadata: UpdateMetadata, apkFile: java.io.File) {
+        proceedWithVerifiedApk(metadata, apkFile)
     }
 
     val themeMode: StateFlow<String> = prefsRepository.themeMode

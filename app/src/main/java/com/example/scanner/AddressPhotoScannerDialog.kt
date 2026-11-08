@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -171,31 +173,33 @@ fun AddressPhotoScannerDialog(
         }
     }
 
+    BackHandler {
+        if (capturedBitmap != null) {
+            capturedBitmap = null
+        } else {
+            onDismiss()
+        }
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(if (capturedBitmap != null) "Crop & Select Address Area" else "Scan Address Photo", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-                navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            if (capturedBitmap != null) {
-                                capturedBitmap = null // Go back to camera
-                            } else {
-                                onDismiss()
-                            }
-                        },
-                        modifier = Modifier.testTag("address_scanner_close_button")
-                    ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black,
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White
-                ),
-                actions = {
-                    if (capturedBitmap == null) {
+            if (capturedBitmap == null) {
+                TopAppBar(
+                    title = { Text("Scan Address Photo", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = { onDismiss() },
+                            modifier = Modifier.testTag("address_scanner_close_button")
+                        ) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Black,
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White
+                    ),
+                    actions = {
                         // Continuous Scan Mode Toggle Button
                         IconButton(
                             onClick = { isContinuousMode = !isContinuousMode },
@@ -247,8 +251,8 @@ fun AddressPhotoScannerDialog(
                             )
                         }
                     }
-                }
-            )
+                )
+            }
         }
     ) { paddingValues ->
         Box(
@@ -408,97 +412,104 @@ fun AddressPhotoScannerDialog(
                 }
 
                 // Bottom Controls: Shutter Button and Gallery Pick
-                Row(
+                Surface(
+                    color = Color.Black.copy(alpha = 0.72f),
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .padding(bottom = 36.dp, start = 24.dp, end = 24.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
+                        .navigationBarsPadding()
                 ) {
-                    // Pick from Gallery shortcut
-                    OutlinedButton(
-                        onClick = {
-                            galleryLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color.White
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.6f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("address_scanner_gallery_btn_bottom")
-                    ) {
-                        Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Gallery")
-                    }
-
-                    // Shutter Button
-                    Box(
+                    Row(
                         modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.25f))
-                            .clickable {
-                                val capture = imageCapture ?: return@clickable
-                                isProcessingOcr = true
-                                ocrErrorMessage = null
-
-                                val photoFile = File(context.cacheDir, "addr_${System.currentTimeMillis()}.jpg")
-                                val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-
-                                capture.takePicture(
-                                    outputOptions,
-                                    ContextCompat.getMainExecutor(context),
-                                    object : ImageCapture.OnImageSavedCallback {
-                                        override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                                            isProcessingOcr = false
-                                            val bmp = BitmapFactory.decodeFile(photoFile.absolutePath)
-                                            val rotatedBmp = rotateBitmapIfNeeded(photoFile.absolutePath, bmp)
-                                            // Crop captured bitmap to match the green viewfinder box area
-                                            val viewfinderCroppedBmp = cropBitmapToViewfinderFrame(rotatedBmp, 0.10f, 0.24f, 0.90f, 0.66f)
-                                            capturedBitmap = viewfinderCroppedBmp
-                                        }
-
-                                        override fun onError(exception: ImageCaptureException) {
-                                            isProcessingOcr = false
-                                            ocrErrorMessage = "Capture failed: ${exception.localizedMessage}"
-                                        }
-                                    }
-                                )
-                            }
-                            .testTag("address_scanner_shutter_button"),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .padding(vertical = 20.dp, horizontal = 24.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.White,
-                            modifier = Modifier.size(56.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.CameraAlt,
-                                    contentDescription = "Capture",
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(28.dp)
+                        // Pick from Gallery shortcut
+                        OutlinedButton(
+                            onClick = {
+                                galleryLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color.White
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("address_scanner_gallery_btn_bottom")
+                        ) {
+                            Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Gallery")
+                        }
+
+                        // Shutter Button
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.28f))
+                                .clickable {
+                                    val capture = imageCapture ?: return@clickable
+                                    isProcessingOcr = true
+                                    ocrErrorMessage = null
+
+                                    val photoFile = File(context.cacheDir, "addr_${System.currentTimeMillis()}.jpg")
+                                    val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+
+                                    capture.takePicture(
+                                        outputOptions,
+                                        ContextCompat.getMainExecutor(context),
+                                        object : ImageCapture.OnImageSavedCallback {
+                                            override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                                                isProcessingOcr = false
+                                                val bmp = BitmapFactory.decodeFile(photoFile.absolutePath)
+                                                val rotatedBmp = rotateBitmapIfNeeded(photoFile.absolutePath, bmp)
+                                                // Crop captured bitmap to match the green viewfinder box area
+                                                val viewfinderCroppedBmp = cropBitmapToViewfinderFrame(rotatedBmp, 0.10f, 0.24f, 0.90f, 0.66f)
+                                                capturedBitmap = viewfinderCroppedBmp
+                                            }
+
+                                            override fun onError(exception: ImageCaptureException) {
+                                                isProcessingOcr = false
+                                                ocrErrorMessage = "Capture failed: ${exception.localizedMessage}"
+                                            }
+                                        }
+                                    )
+                                }
+                                .testTag("address_scanner_shutter_button"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color.White,
+                                modifier = Modifier.size(60.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.CameraAlt,
+                                        contentDescription = "Capture",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
                             }
                         }
-                    }
 
-                    // Cancel button
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Color.White
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.6f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.testTag("address_scanner_cancel_button")
-                    ) {
-                        Text("Cancel")
+                        // Cancel button
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color.White
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("address_scanner_cancel_button")
+                        ) {
+                            Text("Cancel")
+                        }
                     }
                 }
             } else {

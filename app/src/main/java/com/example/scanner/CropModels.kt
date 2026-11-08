@@ -99,6 +99,68 @@ data class CropQuadrilateral(
         return inside
     }
 
+    /**
+     * Moves one of the 4 edges (TOP_EDGE, BOTTOM_EDGE, LEFT_EDGE, RIGHT_EDGE) by (deltaX, deltaY)
+     * in image pixel coordinates while keeping the quadrilateral within bounds and convex.
+     */
+    fun moveEdge(
+        handle: ActiveHandle,
+        deltaX: Float,
+        deltaY: Float,
+        imageWidth: Float,
+        imageHeight: Float
+    ): CropQuadrilateral {
+        val minGap = 32f
+        val candidate = when (handle) {
+            ActiveHandle.TOP_EDGE -> {
+                val minDy = -min(topLeft.y, topRight.y)
+                val maxDyBeforeBottom = min(bottomLeft.y - topLeft.y, bottomRight.y - topRight.y) - minGap
+                val maxDyBounds = imageHeight - max(topLeft.y, topRight.y)
+                val maxDy = min(maxDyBounds, maxDyBeforeBottom).coerceAtLeast(minDy)
+                val clampedDy = deltaY.coerceIn(minDy, maxDy)
+                copy(
+                    topLeft = CropPoint(topLeft.x, (topLeft.y + clampedDy).coerceIn(0f, imageHeight)),
+                    topRight = CropPoint(topRight.x, (topRight.y + clampedDy).coerceIn(0f, imageHeight))
+                )
+            }
+            ActiveHandle.BOTTOM_EDGE -> {
+                val minDyAfterTop = max(topLeft.y - bottomLeft.y, topRight.y - bottomRight.y) + minGap
+                val minDyBounds = -min(bottomLeft.y, bottomRight.y)
+                val maxDy = imageHeight - max(bottomLeft.y, bottomRight.y)
+                val minDy = max(minDyBounds, minDyAfterTop).coerceAtMost(maxDy)
+                val clampedDy = deltaY.coerceIn(minDy, maxDy)
+                copy(
+                    bottomLeft = CropPoint(bottomLeft.x, (bottomLeft.y + clampedDy).coerceIn(0f, imageHeight)),
+                    bottomRight = CropPoint(bottomRight.x, (bottomRight.y + clampedDy).coerceIn(0f, imageHeight))
+                )
+            }
+            ActiveHandle.LEFT_EDGE -> {
+                val minDx = -min(topLeft.x, bottomLeft.x)
+                val maxDxBeforeRight = min(topRight.x - topLeft.x, bottomRight.x - bottomLeft.x) - minGap
+                val maxDxBounds = imageWidth - max(topLeft.x, bottomLeft.x)
+                val maxDx = min(maxDxBounds, maxDxBeforeRight).coerceAtLeast(minDx)
+                val clampedDx = deltaX.coerceIn(minDx, maxDx)
+                copy(
+                    topLeft = CropPoint((topLeft.x + clampedDx).coerceIn(0f, imageWidth), topLeft.y),
+                    bottomLeft = CropPoint((bottomLeft.x + clampedDx).coerceIn(0f, imageWidth), bottomLeft.y)
+                )
+            }
+            ActiveHandle.RIGHT_EDGE -> {
+                val minDxAfterLeft = max(topLeft.x - topRight.x, bottomLeft.x - bottomRight.x) + minGap
+                val minDxBounds = -min(topRight.x, bottomRight.x)
+                val maxDx = imageWidth - max(topRight.x, bottomRight.x)
+                val minDx = max(minDxBounds, minDxAfterLeft).coerceAtMost(maxDx)
+                val clampedDx = deltaX.coerceIn(minDx, maxDx)
+                copy(
+                    topRight = CropPoint((topRight.x + clampedDx).coerceIn(0f, imageWidth), topRight.y),
+                    bottomRight = CropPoint((bottomRight.x + clampedDx).coerceIn(0f, imageWidth), bottomRight.y)
+                )
+            }
+            else -> this
+        }
+        return if (candidate.isValidConvex()) candidate else this
+    }
+
     companion object {
         /**
          * Creates a default inset quadrilateral spanning [insetPct] from the edges of the image.
@@ -124,5 +186,9 @@ enum class ActiveHandle {
     TOP_RIGHT,
     BOTTOM_RIGHT,
     BOTTOM_LEFT,
+    TOP_EDGE,
+    RIGHT_EDGE,
+    BOTTOM_EDGE,
+    LEFT_EDGE,
     CENTER_QUAD
 }

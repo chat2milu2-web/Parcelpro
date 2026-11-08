@@ -208,12 +208,13 @@ fun ParcelEntryScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                shadowElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            if (!showCameraScanner && !showAddressPhotoScanner) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                 Column(
                     modifier = Modifier
                         .padding(horizontal = 16.dp, vertical = 10.dp)
@@ -282,51 +283,54 @@ fun ParcelEntryScreen(
                         }
                     }
                 }
+                }
             }
         },
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("New Parcel Entry", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text(
-                            text = "Batch: ${currentBatch?.batchCode ?: "Loading..."}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onNavigateBack,
-                        modifier = Modifier.testTag("entry_back_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                actions = {
-                    currentBatch?.let { batch ->
-                        IconButton(
-                            onClick = { onViewBatchHistory(batch.id) },
-                            modifier = Modifier.testTag("entry_view_history_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = "View Batch Records",
-                                tint = MaterialTheme.colorScheme.onPrimary
+            if (!showCameraScanner && !showAddressPhotoScanner) {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("New Parcel Entry", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text(
+                                text = "Batch: ${currentBatch?.batchCode ?: "Loading..."}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
                             )
                         }
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onNavigateBack,
+                            modifier = Modifier.testTag("entry_back_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back"
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    actions = {
+                        currentBatch?.let { batch ->
+                            IconButton(
+                                onClick = { onViewBatchHistory(batch.id) },
+                                modifier = Modifier.testTag("entry_view_history_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.History,
+                                    contentDescription = "View Batch Records",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     ) { paddingValues ->
         Column(
@@ -1022,6 +1026,7 @@ fun ParcelEntryScreen(
                 }
             }
         }
+    }
 
     // Camera Scanner Sheet/Dialog
     if (showCameraScanner) {
@@ -1119,5 +1124,4 @@ fun ParcelEntryScreen(
             }
         )
     }
-}
 }

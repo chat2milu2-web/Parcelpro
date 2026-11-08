@@ -844,6 +844,19 @@ fun SettingsScreen(
                             }
                         }
                     }
+
+                    // Subtle Developer Credit Footer (General Tab Bottom)
+                    Text(
+                        text = "Developed by Milan",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 12.dp)
+                            .testTag("developed_by_milan_footer")
+                    )
                 }
 
                 1 -> {

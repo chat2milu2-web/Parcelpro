@@ -3,6 +3,7 @@ package com.example.scanner
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.Paint as NativePaint
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -110,6 +112,10 @@ fun CropEditorScreen(
     var loupePointInImage by remember { mutableStateOf<CropPoint?>(null) }
 
     val currentQuadState = rememberUpdatedState(quad)
+
+    BackHandler {
+        onRetake()
+    }
 
     Scaffold(
         topBar = {
@@ -241,8 +247,14 @@ fun CropEditorScreen(
                                     val sBR = screenFromImage(currentQuad.bottomRight)
                                     val sBL = screenFromImage(currentQuad.bottomLeft)
 
+                                    val sTopMid = Offset((sTL.x + sTR.x) / 2f, (sTL.y + sTR.y) / 2f)
+                                    val sRightMid = Offset((sTR.x + sBR.x) / 2f, (sTR.y + sBR.y) / 2f)
+                                    val sBottomMid = Offset((sBL.x + sBR.x) / 2f, (sBL.y + sBR.y) / 2f)
+                                    val sLeftMid = Offset((sTL.x + sBL.x) / 2f, (sTL.y + sBL.y) / 2f)
+
                                     val startImgPt = imageFromScreen(startPos, invMatrix)
-                                    val touchHitRadiusPx = with(density) { 48.dp.toPx() }
+                                    val touchHitRadiusPx = with(density) { 46.dp.toPx() }
+                                    val edgeSegmentHitRadiusPx = with(density) { 30.dp.toPx() }
 
                                     fun distSq(p1: Offset, p2: Offset): Float {
                                         val dx = p1.x - p2.x
@@ -250,13 +262,48 @@ fun CropEditorScreen(
                                         return dx * dx + dy * dy
                                     }
 
+                                    fun distToSegmentSq(p: Offset, a: Offset, b: Offset): Float {
+                                        val vx = b.x - a.x
+                                        val vy = b.y - a.y
+                                        val lenSq = vx * vx + vy * vy
+                                        if (lenSq <= 0.0001f) return distSq(p, a)
+                                        val t = (((p.x - a.x) * vx + (p.y - a.y) * vy) / lenSq).coerceIn(0f, 1f)
+                                        val proj = Offset(a.x + t * vx, a.y + t * vy)
+                                        return distSq(p, proj)
+                                    }
+
                                     val rSq = touchHitRadiusPx * touchHitRadiusPx
+                                    val edgeSegRSq = edgeSegmentHitRadiusPx * edgeSegmentHitRadiusPx
+
+                                    val handleCandidates = listOf(
+                                        ActiveHandle.TOP_LEFT to distSq(startPos, sTL),
+                                        ActiveHandle.TOP_RIGHT to distSq(startPos, sTR),
+                                        ActiveHandle.BOTTOM_RIGHT to distSq(startPos, sBR),
+                                        ActiveHandle.BOTTOM_LEFT to distSq(startPos, sBL),
+                                        ActiveHandle.TOP_EDGE to distSq(startPos, sTopMid),
+                                        ActiveHandle.RIGHT_EDGE to distSq(startPos, sRightMid),
+                                        ActiveHandle.BOTTOM_EDGE to distSq(startPos, sBottomMid),
+                                        ActiveHandle.LEFT_EDGE to distSq(startPos, sLeftMid)
+                                    )
+                                    val closestPointHandle = handleCandidates
+                                        .filter { it.second <= rSq }
+                                        .minByOrNull { it.second }
+                                        ?.first
+
+                                    val edgeSegmentCandidates = listOf(
+                                        ActiveHandle.TOP_EDGE to distToSegmentSq(startPos, sTL, sTR),
+                                        ActiveHandle.RIGHT_EDGE to distToSegmentSq(startPos, sTR, sBR),
+                                        ActiveHandle.BOTTOM_EDGE to distToSegmentSq(startPos, sBL, sBR),
+                                        ActiveHandle.LEFT_EDGE to distToSegmentSq(startPos, sTL, sBL)
+                                    )
+                                    val closestEdgeSegmentHandle = edgeSegmentCandidates
+                                        .filter { it.second <= edgeSegRSq }
+                                        .minByOrNull { it.second }
+                                        ?.first
 
                                     val handle = when {
-                                        distSq(startPos, sTL) <= rSq -> ActiveHandle.TOP_LEFT
-                                        distSq(startPos, sTR) <= rSq -> ActiveHandle.TOP_RIGHT
-                                        distSq(startPos, sBR) <= rSq -> ActiveHandle.BOTTOM_RIGHT
-                                        distSq(startPos, sBL) <= rSq -> ActiveHandle.BOTTOM_LEFT
+                                        closestPointHandle != null -> closestPointHandle
+                                        closestEdgeSegmentHandle != null -> closestEdgeSegmentHandle
                                         currentQuad.containsPoint(startImgPt) -> ActiveHandle.CENTER_QUAD
                                         else -> null
                                     }
@@ -265,8 +312,8 @@ fun CropEditorScreen(
 
                                     if (handle != null) {
                                         var dragOffsetInImage = CropPoint(0f, 0f)
-                                        var initialDragQuad = currentQuad
-                                        var initialTouchImgPt = startImgPt
+                                        val initialDragQuad = currentQuad
+                                        val initialTouchImgPt = startImgPt
 
                                         when (handle) {
                                             ActiveHandle.TOP_LEFT -> {
@@ -284,6 +331,30 @@ fun CropEditorScreen(
                                             ActiveHandle.BOTTOM_LEFT -> {
                                                 dragOffsetInImage = CropPoint(startImgPt.x - currentQuad.bottomLeft.x, startImgPt.y - currentQuad.bottomLeft.y)
                                                 loupePointInImage = currentQuad.bottomLeft
+                                            }
+                                            ActiveHandle.TOP_EDGE -> {
+                                                loupePointInImage = CropPoint(
+                                                    (currentQuad.topLeft.x + currentQuad.topRight.x) / 2f,
+                                                    (currentQuad.topLeft.y + currentQuad.topRight.y) / 2f
+                                                )
+                                            }
+                                            ActiveHandle.RIGHT_EDGE -> {
+                                                loupePointInImage = CropPoint(
+                                                    (currentQuad.topRight.x + currentQuad.bottomRight.x) / 2f,
+                                                    (currentQuad.topRight.y + currentQuad.bottomRight.y) / 2f
+                                                )
+                                            }
+                                            ActiveHandle.BOTTOM_EDGE -> {
+                                                loupePointInImage = CropPoint(
+                                                    (currentQuad.bottomLeft.x + currentQuad.bottomRight.x) / 2f,
+                                                    (currentQuad.bottomLeft.y + currentQuad.bottomRight.y) / 2f
+                                                )
+                                            }
+                                            ActiveHandle.LEFT_EDGE -> {
+                                                loupePointInImage = CropPoint(
+                                                    (currentQuad.topLeft.x + currentQuad.bottomLeft.x) / 2f,
+                                                    (currentQuad.topLeft.y + currentQuad.bottomLeft.y) / 2f
+                                                )
                                             }
                                             ActiveHandle.CENTER_QUAD -> {
                                                 loupePointInImage = null
@@ -334,6 +405,40 @@ fun CropEditorScreen(
                                                         if (testQuad.isValidConvex()) {
                                                             quad = testQuad
                                                             loupePointInImage = target
+                                                        }
+                                                    }
+                                                    ActiveHandle.TOP_EDGE,
+                                                    ActiveHandle.BOTTOM_EDGE,
+                                                    ActiveHandle.LEFT_EDGE,
+                                                    ActiveHandle.RIGHT_EDGE -> {
+                                                        val dx = currImgPt.x - initialTouchImgPt.x
+                                                        val dy = currImgPt.y - initialTouchImgPt.y
+                                                        val movedQuad = initialDragQuad.moveEdge(
+                                                            handle = handle,
+                                                            deltaX = dx,
+                                                            deltaY = dy,
+                                                            imageWidth = imgW,
+                                                            imageHeight = imgH
+                                                        )
+                                                        quad = movedQuad
+                                                        loupePointInImage = when (handle) {
+                                                            ActiveHandle.TOP_EDGE -> CropPoint(
+                                                                (movedQuad.topLeft.x + movedQuad.topRight.x) / 2f,
+                                                                (movedQuad.topLeft.y + movedQuad.topRight.y) / 2f
+                                                            )
+                                                            ActiveHandle.BOTTOM_EDGE -> CropPoint(
+                                                                (movedQuad.bottomLeft.x + movedQuad.bottomRight.x) / 2f,
+                                                                (movedQuad.bottomLeft.y + movedQuad.bottomRight.y) / 2f
+                                                            )
+                                                            ActiveHandle.LEFT_EDGE -> CropPoint(
+                                                                (movedQuad.topLeft.x + movedQuad.bottomLeft.x) / 2f,
+                                                                (movedQuad.topLeft.y + movedQuad.bottomLeft.y) / 2f
+                                                            )
+                                                            ActiveHandle.RIGHT_EDGE -> CropPoint(
+                                                                (movedQuad.topRight.x + movedQuad.bottomRight.x) / 2f,
+                                                                (movedQuad.topRight.y + movedQuad.bottomRight.y) / 2f
+                                                            )
+                                                            else -> null
                                                         }
                                                     }
                                                     ActiveHandle.CENTER_QUAD -> {
@@ -400,16 +505,40 @@ fun CropEditorScreen(
                             style = Stroke(width = 3.dp.toPx())
                         )
 
-                        // 4. Draw Edge Midpoint Indicators
+                        // 4. Draw Interactive Edge Midpoint Handles (Top, Right, Bottom, Left)
                         val topMid = Offset((screenTL.x + screenTR.x) / 2f, (screenTL.y + screenTR.y) / 2f)
                         val rightMid = Offset((screenTR.x + screenBR.x) / 2f, (screenTR.y + screenBR.y) / 2f)
                         val bottomMid = Offset((screenBL.x + screenBR.x) / 2f, (screenBL.y + screenBR.y) / 2f)
                         val leftMid = Offset((screenTL.x + screenBL.x) / 2f, (screenTL.y + screenBL.y) / 2f)
 
-                        val edgeRadius = 5.dp.toPx()
-                        listOf(topMid, rightMid, bottomMid, leftMid).forEach { mid ->
-                            drawCircle(color = Color.White, radius = edgeRadius, center = mid)
-                            drawCircle(color = boundaryColor, radius = edgeRadius, center = mid, style = Stroke(2.dp.toPx()))
+                        val edgeHandles = listOf(
+                            ActiveHandle.TOP_EDGE to topMid,
+                            ActiveHandle.RIGHT_EDGE to rightMid,
+                            ActiveHandle.BOTTOM_EDGE to bottomMid,
+                            ActiveHandle.LEFT_EDGE to leftMid
+                        )
+
+                        edgeHandles.forEach { (eType, mid) ->
+                            val isEdgeActive = activeHandle == eType
+                            val edgeHaloRadius = if (isEdgeActive) 20.dp.toPx() else 14.dp.toPx()
+                            val edgeOuterRadius = if (isEdgeActive) 13.dp.toPx() else 9.dp.toPx()
+                            val edgeInnerRadius = if (isEdgeActive) 8.dp.toPx() else 5.5.dp.toPx()
+
+                            drawCircle(
+                                color = if (isEdgeActive) Color(0xFF00E676).copy(alpha = 0.45f) else Color(0xFF10B981).copy(alpha = 0.22f),
+                                radius = edgeHaloRadius,
+                                center = mid
+                            )
+                            drawCircle(
+                                color = if (isEdgeActive) Color(0xFF00E676) else Color(0xFF10B981),
+                                radius = edgeOuterRadius,
+                                center = mid
+                            )
+                            drawCircle(
+                                color = Color.White,
+                                radius = edgeInnerRadius,
+                                center = mid
+                            )
                         }
 
                         // 5. Draw 4 CamScanner-Style Corner Handles
@@ -587,7 +716,9 @@ fun CropEditorScreen(
             // Buttons: Retake, Reset, Auto Detect, Confirm & Scan
             Surface(
                 color = Color(0xFF141414),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),

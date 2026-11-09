@@ -57,15 +57,43 @@ class ParcelEntryViewModel(application: Application) : AndroidViewModel(applicat
     val currentBatch: StateFlow<BatchEntity?> = _currentBatch.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val batchBarcodes: StateFlow<Set<String>> = _currentBatch
+    val batchParcels: StateFlow<List<ParcelEntity>> = _currentBatch
         .flatMapLatest { batch ->
             if (batch != null) {
-                repository.getParcelsByBatch(batch.id).map { list -> list.map { it.barcode.trim() }.toSet() }
+                repository.getParcelsByBatch(batch.id)
             } else {
-                flowOf(emptySet())
+                flowOf(emptyList())
             }
         }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val batchBarcodes: StateFlow<Set<String>> = batchParcels
+        .map { list -> list.map { it.barcode.trim() }.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    val lastSavedParcel: StateFlow<ParcelEntity?> = batchParcels
+        .map { list -> list.maxByOrNull { it.sequenceNumber } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val recentPincodes: StateFlow<List<String>> = batchParcels
+        .map { list ->
+            list.sortedByDescending { it.sequenceNumber }
+                .map { it.destinationPincode.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .take(4)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val recentAddressees: StateFlow<List<String>> = batchParcels
+        .map { list ->
+            list.sortedByDescending { it.sequenceNumber }
+                .map { it.addresseeName.trim().uppercase() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .take(4)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val pincodeLength: StateFlow<Int> = prefsRepository.pincodeLength
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 6)
@@ -105,6 +133,35 @@ class ParcelEntryViewModel(application: Application) : AndroidViewModel(applicat
 
     private val _recentSavedMessage = MutableStateFlow<String?>(null)
     val recentSavedMessage: StateFlow<String?> = _recentSavedMessage.asStateFlow()
+
+    fun recallLastSavedParcel(parcel: ParcelEntity) {
+        viewModelScope.launch {
+            repository.deleteParcelById(parcel.id)
+            val resolved = if (parcel.destinationPincode.length == 6) {
+                IndianPincodeDirectory.lookup(parcel.destinationPincode)?.displayName
+            } else {
+                null
+            }
+            val formatNum: (Double) -> String = { v ->
+                if (v <= 0.0) ""
+                else if (v % 1.0 == 0.0) v.toInt().toString()
+                else v.toString()
+            }
+            _formState.value = _formState.value.copy(
+                barcode = parcel.barcode,
+                pincode = parcel.destinationPincode,
+                resolvedLocation = resolved,
+                addressee = parcel.addresseeName,
+                weight = formatNum(parcel.physicalWeight),
+                length = formatNum(parcel.length),
+                breadth = formatNum(parcel.breadth),
+                height = formatNum(parcel.height),
+                errorMessage = null,
+                crossBatchWarning = null
+            )
+            _recentSavedMessage.value = "Restored Parcel #${parcel.sequenceNumber} (${parcel.barcode}) for editing"
+        }
+    }
 
     fun loadBatch(batchId: Long) {
         viewModelScope.launch {

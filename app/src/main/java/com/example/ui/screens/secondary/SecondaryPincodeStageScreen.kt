@@ -72,7 +72,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Mic
+import com.example.util.InlineVoiceListeningBanner
 import com.example.util.VoiceInputHelper
+import com.example.util.rememberInlineVoiceController
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,21 +102,17 @@ fun SecondaryPincodeStageScreen(
 
     var showJumpDialog by remember { mutableStateOf(false) }
 
-    val voiceLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val spokenResults = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            val text = spokenResults?.firstOrNull() ?: ""
-            if (text.isNotBlank()) {
-                val parsed = VoiceInputHelper.parseVoiceResult(text, isNumericField = true).take(pincodeLength)
+    val voiceController = rememberInlineVoiceController(
+        onCandidatesReceived = { _, candidates, isFinal ->
+            val parsed = VoiceInputHelper.parseVoiceCandidates(candidates, isNumericField = true).take(pincodeLength)
+            if (parsed.isNotBlank()) {
                 pincodeText = parsed
-                if (parsed.length == pincodeLength && currentParcel != null) {
+                if (isFinal && parsed.length == pincodeLength && currentParcel != null) {
                     viewModel.savePincode(currentParcel.id, parsed)
                 }
             }
         }
-    }
+    )
 
     Scaffold(
         topBar = {
@@ -167,6 +165,8 @@ fun SecondaryPincodeStageScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                InlineVoiceListeningBanner(controller = voiceController)
+
                 // Progress Header Bar
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -325,10 +325,10 @@ fun SecondaryPincodeStageScreen(
                             trailingIcon = {
                                 IconButton(
                                     onClick = {
-                                        try {
-                                            val intent = VoiceInputHelper.createSpeechIntent("Speak Destination Pincode (English, Hindi, Bengali)")
-                                            voiceLauncher.launch(intent)
-                                        } catch (_: Exception) {}
+                                        voiceController.startListening(
+                                            "PINCODE",
+                                            "Speak Destination Pincode (English, বাংলা, हिन्दी)"
+                                        )
                                     },
                                     modifier = Modifier.testTag("voice_pincode_stage_button")
                                 ) {

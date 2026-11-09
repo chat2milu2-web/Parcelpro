@@ -65,7 +65,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Mic
+import com.example.util.InlineVoiceListeningBanner
 import com.example.util.VoiceInputHelper
+import com.example.util.rememberInlineVoiceController
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,35 +109,25 @@ fun SecondaryMeasurementsStageScreen(
 
     var showJumpDialog by remember { mutableStateOf(false) }
 
-    var pendingVoiceTarget by remember { mutableStateOf<String?>(null) }
-    val voiceLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val spokenResults = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            val text = spokenResults?.firstOrNull() ?: ""
-            if (text.isNotBlank()) {
-                when (pendingVoiceTarget) {
-                    "WEIGHT" -> {
-                        weightText = VoiceInputHelper.parseVoiceResult(text, isNumericField = true)
-                    }
-                    "ALL_DIMENSIONS" -> {
-                        val numbers = VoiceInputHelper.extractMultipleNumbers(text)
-                        if (numbers.isNotEmpty()) lengthText = numbers[0]
-                        if (numbers.size > 1) breadthText = numbers[1]
-                        if (numbers.size > 2) heightText = numbers[2]
-                    }
+    val voiceController = rememberInlineVoiceController(
+        onCandidatesReceived = { target, candidates, _ ->
+            when (target) {
+                "WEIGHT" -> {
+                    val parsed = VoiceInputHelper.parseVoiceCandidates(candidates, isNumericField = true)
+                    if (parsed.isNotBlank()) weightText = parsed
+                }
+                "ALL_DIMENSIONS" -> {
+                    val numbers = VoiceInputHelper.extractMultipleNumbersFromCandidates(candidates)
+                    if (numbers.isNotEmpty()) lengthText = numbers[0]
+                    if (numbers.size > 1) breadthText = numbers[1]
+                    if (numbers.size > 2) heightText = numbers[2]
                 }
             }
         }
-    }
+    )
 
     val startVoiceInput: (String, String) -> Unit = { target, prompt ->
-        pendingVoiceTarget = target
-        try {
-            val intent = VoiceInputHelper.createSpeechIntent(prompt)
-            voiceLauncher.launch(intent)
-        } catch (_: Exception) {}
+        voiceController.startListening(target, prompt)
     }
 
     Scaffold(
@@ -189,6 +181,8 @@ fun SecondaryMeasurementsStageScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                InlineVoiceListeningBanner(controller = voiceController)
+
                 // Progress Header Bar
                 Card(
                     modifier = Modifier.fillMaxWidth(),

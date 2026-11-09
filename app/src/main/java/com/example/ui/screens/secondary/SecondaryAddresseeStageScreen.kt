@@ -69,7 +69,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Mic
+import com.example.util.InlineVoiceListeningBanner
 import com.example.util.VoiceInputHelper
+import com.example.util.rememberInlineVoiceController
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -96,18 +98,14 @@ fun SecondaryAddresseeStageScreen(
 
     var showJumpDialog by remember { mutableStateOf(false) }
 
-    val voiceLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val spokenResults = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            val text = spokenResults?.firstOrNull() ?: ""
-            if (text.isNotBlank()) {
-                val parsed = VoiceInputHelper.parseVoiceResult(text, isNumericField = false)
+    val voiceController = rememberInlineVoiceController(
+        onCandidatesReceived = { _, candidates, _ ->
+            val parsed = VoiceInputHelper.parseVoiceCandidates(candidates, isNumericField = false)
+            if (parsed.isNotBlank()) {
                 addresseeText = parsed
             }
         }
-    }
+    )
 
     Scaffold(
         topBar = {
@@ -160,6 +158,8 @@ fun SecondaryAddresseeStageScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                InlineVoiceListeningBanner(controller = voiceController)
+
                 // Progress Header Bar
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -314,10 +314,10 @@ fun SecondaryAddresseeStageScreen(
                             trailingIcon = {
                                 IconButton(
                                     onClick = {
-                                        try {
-                                            val intent = VoiceInputHelper.createSpeechIntent("Speak Recipient Name (English, Hindi, Bengali)")
-                                            voiceLauncher.launch(intent)
-                                        } catch (_: Exception) {}
+                                        voiceController.startListening(
+                                            "ADDRESSEE",
+                                            "Speak Recipient Name (English, বাংলা, हिन्दी)"
+                                        )
                                     },
                                     modifier = Modifier.testTag("voice_addressee_stage_button")
                                 ) {
